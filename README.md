@@ -37,7 +37,7 @@ ______________________________________________________________________
 <!--TOC-->
 
 ## News!
-* [December 19, 2025] We have released the Cosmos-Reason2 models and code. The 2B and 8B models are now available. For more details, please check our blog!
+* [December 19, 2025] We have released the Cosmos-Reason2 models and code for Physical AI common sense and embodied reasoning. The 2B and 8B models are now available on Hugging Face.
 
 ## Model Family
 * [Cosmos-Reason2-2B](https://huggingface.co/nvidia/Cosmos-Reason2-2B)
@@ -125,12 +125,19 @@ Optional arguments:
 
 ## Inference
 
-Minimum requirements:
+### Minimum GPU Memory
 
 | Model | GPU Memory |
 | --- | --- |
 | Cosmos-Reason2-2B | 24GB |
 | Cosmos-Reason2-8B | 32GB |
+
+### Tested Platforms
+
+Inference has been tested on:
+* NVIDIA GB200, H100 and A100
+* DGX Spark using Hugging Face Transformers and vLLM
+* Jetson AGX Thor (Edge) using Hugging Face Transformers
 
 ### Transformers
 
