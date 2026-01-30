@@ -49,27 +49,31 @@ Example:
 """
 
 import os
+import shlex
+import shutil
+import subprocess
 from typing import Annotated, Literal
+
+_MINIMUM_HF_CLI_VERSION = "1.3.5"
 
 
 def init():
-    import logging
-    import warnings
-
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     os.environ["TORCH_LOGS"] = "-dynamo"
-    os.environ["LOGURU_LEVEL"] = "ERROR"
+
+    import logging
+    import warnings
 
     warnings.filterwarnings("ignore")
     logging.basicConfig(level=logging.ERROR)
 
 
 init()
+print("Loading dependencies...")
 
 
 import base64
 import json
-import shutil
 from io import BytesIO
 from pathlib import Path
 
@@ -78,7 +82,6 @@ import requests
 import torch
 import tyro
 from datasets import load_dataset
-from huggingface_hub import snapshot_download
 from llmcompressor import oneshot
 from llmcompressor.modeling.moe_context import moe_calibration_context
 from llmcompressor.modifiers.quantization import QuantizationModifier
@@ -111,6 +114,25 @@ class Args(pydantic.BaseModel):
     """Maximum sequence length to use for quantization. (Defaults to CR2/Qwen3-VL max model len)"""
     seed: int = 42
     """Seed to use for random number generator."""
+
+
+def _hf_download(cmd_args: list[str]) -> str:
+    """Run Hugging Face CLI download command and return the local path.
+
+    Uses a newer Hugging Face CLI version to download checkpoint. The dependency
+    version is very old and not robust.
+    """
+    cmd = [
+        "uvx",
+        f"hf>={_MINIMUM_HF_CLI_VERSION}",
+        "download",
+        *cmd_args,
+    ]
+    print(f"{shlex.join(cmd)}")
+    subprocess.check_call(cmd, text=True)
+    return subprocess.check_output(
+        [*cmd, "--quiet"], text=True, env=dict(os.environ) | {"HF_HUB_OFFLINE": "1"}
+    ).strip()
 
 
 def preprocess_and_tokenize(
@@ -245,6 +267,14 @@ def postprocess_config(config_path: Path):
 
 
 def quantize(args: Args):
+    print("Pre-downloading dataset: lmms-lab/flickr30k")
+    _hf_download(["lmms-lab/flickr30k", "--repo-type", "dataset"])
+    if os.path.exists(args.model):
+        model_path = Path(args.model)
+    else:
+        print(f"Pre-downloading model: {args.model}")
+        model_path = Path(_hf_download([args.model]))
+
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     model = Qwen3VLForConditionalGeneration.from_pretrained(
@@ -293,28 +323,22 @@ def quantize(args: Args):
     config_path = output_dir / "config.json"
     print(f"Postprocessing config file {config_path}...")
     postprocess_config(config_path)
-    if not (model_path := Path(args.model)).exists():
-        # path for remote model / HF ID
-        snapshot_download(
-            repo_id=args.model,
-            ignore_patterns=["config.json", "*.safetensors*"],
-            local_dir=output_dir,
-        )
-    else:
-        # path for local model directory
-        files_to_copy = [
-            f
-            for f in model_path.glob("*")
-            if f.name != "config.json"
-            and "safetensors" not in f.name
-            and not f.is_dir()
-        ]
-        for file in files_to_copy:
-            shutil.copy(file, output_dir / file.name)
+    shutil.copytree(
+        model_path,
+        output_dir,
+        ignore=lambda dir, files: [
+            f for f in files if f == "config.json" or "safetensors" in f
+        ],
+        dirs_exist_ok=True,
+    )
     print(f"Quantization complete! Model saved to: {output_dir}")
 
 
 def main():
+    from loguru import logger as loguru_logger
+
+    loguru_logger.remove()
+
     args = tyro.cli(Args, description=__doc__)
     quantize(args)
 
